@@ -1,4 +1,3 @@
-
 """
 In this homework you will learn 
 to use a manual cross valudation loop that 
@@ -81,7 +80,16 @@ rs = 2
 # Correct annualization for ~8 bars per trading day (H3)
 ANNUALIZATION = 252 * 8  # 2016
 
-file_path = 'outputfile.txt'
+# Epsilon added to the Profit Factor denominator to prevent division-by-zero
+# blow-up (inf/nan) when a fold has zero losing trades.
+EPS_PF = 1e-6
+
+# make sure the output folder for the plots exists
+import os
+os.makedirs('Results', exist_ok=True)
+
+# file_path = 'outputfile.txt'
+file_path = 'outputfile_logistic_ManualCV_PROFITFACTOR.txt'
 sys.stdout = open(file_path, "w")
 
 # --------------------------------------------------------------------------------------
@@ -130,6 +138,42 @@ df_train = df_filtered.iloc[0:10000]
 df_test = df_filtered.iloc[10000:12000]
 
 # --------------------------------------------------------------------------------------
+# Profit Factor scorer (economic score)
+# --------------------------------------------------------------------------------------
+def profit_factor(y_true, y_pred):
+    """
+    y_true: realized future returns (retFut1) on the slice
+    y_pred: model predictions (class labels 1/0); we go long if 1, short if 0
+
+    PF = sum(profits) / sum(abs(losses))
+
+    An epsilon is added to the denominator to prevent a division-by-zero
+    blow-up (inf) when a slice has zero losing trades. When this guard is
+    triggered, a printout alerts that the epsilon fallback was applied.
+    """
+    positions_arr = np.where(y_pred > 0, 1, -1)
+    positions_arr = np.nan_to_num(positions_arr, nan=0.0)
+
+    dailyRet_arr = positions_arr * y_true
+    dailyRet_arr = np.nan_to_num(dailyRet_arr, nan=0.0)
+
+    profits = np.where(dailyRet_arr >= 0, dailyRet_arr, 0.0)
+    losses = np.where(dailyRet_arr < 0, dailyRet_arr, 0.0)
+
+    denom = float(np.sum(np.abs(losses)))
+    if denom == 0.0:
+        print(
+            "[PF guard] Zero losses encountered (sum(profits)={:.6f}); "
+            "applying epsilon={} to denominator to prevent blow-up.".format(
+                float(np.sum(profits)), EPS_PF
+            )
+        )
+    return float(np.sum(profits)) / (denom + EPS_PF)
+
+# realized returns of the training set (needed by the Profit Factor on each validation fold)
+ret_train_values = df_train['retFut1'].values
+
+# --------------------------------------------------------------------------------------
 # Manual grid search over C (TimeSeries CV)
 # --------------------------------------------------------------------------------------
 imputer = SimpleImputer(strategy="constant", fill_value=0)
@@ -168,15 +212,22 @@ for C in c_grid:
         pipe.set_params(logistic__C=C)
         pipe.fit(X_tr, y_tr)
         preds = pipe.predict(X_va)
-        fold_scores.append(accuracy_score(y_va, preds))
+        # fold_scores.append(accuracy_score(y_va, preds))
+        ret_va = ret_train_values[val_idx]  # realized returns on validation slice
+        fold_scores.append(profit_factor(ret_va, preds))  # Profit Factor instead of accuracy
 
     mean_score = float(np.mean(fold_scores))
     std_score = float(np.std(fold_scores))
 
+    # cv_rows.append({
+    #     "C": C,
+    #     "mean_cv_accuracy": mean_score,
+    #     "std_cv_accuracy": std_score
+    # })
     cv_rows.append({
         "C": C,
-        "mean_cv_accuracy": mean_score,
-        "std_cv_accuracy": std_score
+        "mean_cv_profit_factor": mean_score,
+        "std_cv_profit_factor": std_score
     })
 
     if mean_score > best_cv_score:
@@ -184,10 +235,13 @@ for C in c_grid:
         best_c = C
 
 print(f"Best parameters : {{'logistic__C': {best_c}, 'logistic__penalty': 'l2'}}")
-print("Best cross-validation score : {:.2f}".format(best_cv_score * 100))
+# print("Best cross-validation score : {:.2f}".format(best_cv_score * 100))
+print("Best cross-validation mean Profit Factor : {:.6f}".format(best_cv_score))
 
-results = pd.DataFrame(cv_rows).sort_values("mean_cv_accuracy", ascending=False)
-results.to_csv("results_logisticreg.csv", index=False)
+# results = pd.DataFrame(cv_rows).sort_values("mean_cv_accuracy", ascending=False)
+# results.to_csv("results_logisticreg.csv", index=False)
+results = pd.DataFrame(cv_rows).sort_values("mean_cv_profit_factor", ascending=False)
+results.to_csv("results_logisticreg_profitfactor.csv", index=False)
 
 # Fit best model on full training set
 pipe.set_params(logistic__C=best_c)
