@@ -81,7 +81,16 @@ rs = 2  # kept for consistency with other scripts (not used in manual CV)
 # Correct annualization for ~8 bars per trading day (H3)
 ANNUALIZATION = 252 * 8  # 2016
 
-file_path = 'outputfile.txt'
+# Epsilon added to the Profit Factor denominator to prevent division-by-zero
+# blow-up (inf/nan) when a fold has zero losing trades.
+EPS_PF = 1e-6
+
+# make sure the output folder for the plots exists
+import os
+os.makedirs('Results', exist_ok=True)
+
+# file_path = 'outputfile.txt'
+file_path = 'outputfile_ridge_ManualCV_PROFITFACTOR.txt'
 sys.stdout = open(file_path, "w")
 
 # --------------------------------------------------------------------------------------
@@ -140,6 +149,39 @@ y_test = y.iloc[10000:12000]
 df_train = df_filtered.iloc[0:10000]
 df_test = df_filtered.iloc[10000:12000]
 
+# --------------------------------------------------------------------------------------
+# Profit Factor scorer (economic score)
+# --------------------------------------------------------------------------------------
+def profit_factor(y_true, y_pred):
+    """
+    y_true: realized future returns (retFut1) on the slice
+    y_pred: model predictions (continuous); we trade sign(y_pred)
+
+    PF = sum(profits) / sum(abs(losses))
+
+    An epsilon is added to the denominator to prevent a division-by-zero
+    blow-up (inf) when a slice has zero losing trades. When this guard is
+    triggered, a printout alerts that the epsilon fallback was applied.
+    """
+    positions_arr = np.where(y_pred > 0, 1, -1)
+    positions_arr = np.nan_to_num(positions_arr, nan=0.0)
+
+    dailyRet_arr = positions_arr * y_true
+    dailyRet_arr = np.nan_to_num(dailyRet_arr, nan=0.0)
+
+    profits = np.where(dailyRet_arr >= 0, dailyRet_arr, 0.0)
+    losses = np.where(dailyRet_arr < 0, dailyRet_arr, 0.0)
+
+    denom = float(np.sum(np.abs(losses)))
+    if denom == 0.0:
+        print(
+            "[PF guard] Zero losses encountered (sum(profits)={:.6f}); "
+            "applying epsilon={} to denominator to prevent blow-up.".format(
+                float(np.sum(profits)), EPS_PF
+            )
+        )
+    return float(np.sum(profits)) / (denom + EPS_PF)
+
 
 # --------------------------------------------------------------------------------------
 # Manual CV loop over alpha (TimeSeriesSplit)
@@ -180,16 +222,23 @@ for alpha in alpha_grid:
         pipe.fit(X_tr, y_tr)
         preds = pipe.predict(X_va)
 
-        r2_fold = r2_score(y_va, preds)
-        fold_scores.append(r2_fold)
+        # r2_fold = r2_score(y_va, preds)
+        # fold_scores.append(r2_fold)
+        pf_fold = profit_factor(y_va, preds)  # Profit Factor instead of R2
+        fold_scores.append(pf_fold)
 
     mean_score = float(np.mean(fold_scores))
     std_score = float(np.std(fold_scores))
 
+    # cv_rows.append({
+    #     "ridge__alpha": alpha,
+    #     "mean_cv_r2": mean_score,
+    #     "std_cv_r2": std_score
+    # })
     cv_rows.append({
         "ridge__alpha": alpha,
-        "mean_cv_r2": mean_score,
-        "std_cv_r2": std_score
+        "mean_cv_profit_factor": mean_score,
+        "std_cv_profit_factor": std_score
     })
 
     if mean_score > best_cv_score:
@@ -197,10 +246,13 @@ for alpha in alpha_grid:
         best_alpha = alpha
 
 print("Best parameters : {}".format({"ridge__alpha": best_alpha}))
-print("Best cross-validation mean R2 : {:.6f}".format(best_cv_score))
+# print("Best cross-validation mean R2 : {:.6f}".format(best_cv_score))
+print("Best cross-validation mean Profit Factor : {:.6f}".format(best_cv_score))
 
-results = pd.DataFrame(cv_rows).sort_values("mean_cv_r2", ascending=False)
-results.to_csv("results_ridgereg_r2.csv", index=False)
+# results = pd.DataFrame(cv_rows).sort_values("mean_cv_r2", ascending=False)
+# results.to_csv("results_ridgereg_r2.csv", index=False)
+results = pd.DataFrame(cv_rows).sort_values("mean_cv_profit_factor", ascending=False)
+results.to_csv("results_ridgereg_profitfactor.csv", index=False)
 
 # Fit best model on full training set
 pipe.set_params(ridge__alpha=best_alpha)
