@@ -1,0 +1,9 @@
+Best parameters : {'logistic__C': 2.636650898730358, 'logistic__penalty': 'l2'}
+Best cross-validation mean Profit Factor : 1.195771
+MCPT permutation method: block permutation of retFut1 (block_size=5), nreps=500
+MCPT solo p-value (best C)      : 0.002000
+MCPT unbiased p-value (best C)  : 0.002000
+In-sample: CAGR=0.19489 Sharpe ratio=2.50579 maxDD=-0.0693804 maxDDD=989 Calmar ratio=2.809
+
+Out-of-sample: CAGR=0.207442 Sharpe ratio=2.09955 maxDD=-0.0747329 maxDDD=444 Calmar ratio=2.77577 accuracy_score=0.545
+
