@@ -1,0 +1,6 @@
+Best parameters : {'ridge__alpha': np.float64(1.0)}
+Best cross-validation mean Profit Factor : 1.151724
+In-sample: CAGR=0.232107 Sharpe ratio=2.93289 maxDD=-0.0473858 maxDDD=1441 Calmar ratio=4.89825
+
+Out-of-sample: CAGR=0.164141 Sharpe ratio=1.70108 maxDD=-0.0681056 maxDDD=545 Calmar ratio=2.4101  Rho=0.0861274 PVal=0.000115026
+
